@@ -186,12 +186,27 @@ export async function getPairRecentPhotos(userId, limit = 4) {
   return (data || []).map(p => p.photo_url);
 }
 
+function resizeImage(base64, maxWidth = 1200, quality = 0.75) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      let { width, height } = img;
+      if (width > maxWidth) {
+        height = Math.round(height * maxWidth / width);
+        width = maxWidth;
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+      canvas.toBlob(resolve, 'image/jpeg', quality);
+    };
+    img.src = base64.startsWith('data:') ? base64 : `data:image/jpeg;base64,${base64}`;
+  });
+}
+
 async function uploadToStorage(base64, folder) {
-  const base64Data = base64.includes(',') ? base64.split(',')[1] : base64;
-  const byteString = atob(base64Data);
-  const bytes = new Uint8Array(byteString.length);
-  for (let i = 0; i < byteString.length; i++) bytes[i] = byteString.charCodeAt(i);
-  const blob = new Blob([bytes], { type: 'image/jpeg' });
+  const blob = await resizeImage(base64);
 
   const path = `${folder}/${crypto.randomUUID()}.jpg`;
   const { error } = await supabase.storage
@@ -226,10 +241,9 @@ export async function createMoment(authorId, title, description, date, photosBas
   const photos = typeof photosBase64 === 'string' ? [photosBase64] : photosBase64;
   let photo_url = null;
 
-  const uploadedUrls = [];
-  for (const base64 of photos) {
-    uploadedUrls.push(await uploadToStorage(base64, 'moments'));
-  }
+  const uploadedUrls = await Promise.all(
+    photos.map(base64 => uploadToStorage(base64, 'moments'))
+  );
 
   if (uploadedUrls.length > 0) photo_url = uploadedUrls[0];
 
