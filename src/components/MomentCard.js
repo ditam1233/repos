@@ -90,6 +90,7 @@ export default function MomentCard({ moment, onDelete, currentUserId }) {
                 component="img"
                 image={moment.photo_url}
                 alt={moment.title}
+                loading="lazy"
                 className="moment-photo"
                 sx={{
                   height: { xs: 200, sm: 240 },

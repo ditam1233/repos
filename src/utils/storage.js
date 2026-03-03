@@ -186,7 +186,7 @@ export async function getPairRecentPhotos(userId, limit = 4) {
   return (data || []).map(p => p.photo_url);
 }
 
-function resizeImage(base64, maxWidth = 1200, quality = 0.75) {
+function resizeImage(base64, maxWidth = 800, quality = 0.6) {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {

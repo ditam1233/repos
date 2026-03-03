@@ -14,6 +14,7 @@ export default function PhotoCarousel({ photos, height = 400, onPhotoClick }) {
         component="img"
         src={photos[0]}
         alt=""
+        loading="lazy"
         onClick={() => onPhotoClick?.(photos[0])}
         sx={{
           width: '100%', maxHeight: height, objectFit: 'cover', display: 'block',
@@ -49,6 +50,7 @@ export default function PhotoCarousel({ photos, height = 400, onPhotoClick }) {
             component="img"
             src={url}
             alt=""
+            loading="lazy"
             onClick={() => onPhotoClick?.(url)}
             sx={{
               width: '100%', maxHeight: height, objectFit: 'cover',
