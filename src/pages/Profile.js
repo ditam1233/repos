@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { getUser, getPairMoments, updateProfile, uploadAvatar } from '../utils/storage';
+import { getUser, getPairMoments, updateProfile, uploadAvatar, unlinkPartner } from '../utils/storage';
 import {
   Box, AppBar, Toolbar, Typography, Avatar, Button, Card,
   List, ListItem, Dialog, DialogTitle, DialogContent, TextField, Fab, IconButton, CircularProgress,
 } from '@mui/material';
+import HeartBrokenIcon from '@mui/icons-material/HeartBroken';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import CheckIcon from '@mui/icons-material/Check';
@@ -26,6 +27,8 @@ export default function Profile() {
   const [editLoading, setEditLoading] = useState(false);
   const [showChangelog, setShowChangelog] = useState(false);
   const [avatarLoading, setAvatarLoading] = useState(false);
+  const [showUnlink, setShowUnlink] = useState(false);
+  const [unlinkLoading, setUnlinkLoading] = useState(false);
 
   useEffect(() => {
     if (!user) { navigate('/auth'); return; }
@@ -78,6 +81,16 @@ export default function Profile() {
       setAvatarLoading(false);
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleUnlink = async () => {
+    setUnlinkLoading(true);
+    await unlinkPartner(user.id);
+    await refresh();
+    setShowUnlink(false);
+    setUnlinkLoading(false);
+    setPartner(null);
+    setMomentCount(0);
   };
 
   const displayName = user.display_name || user.username;
@@ -199,6 +212,16 @@ export default function Profile() {
         }}>
           Редактировать профиль
         </Button>
+        {partner && (
+          <Button fullWidth onClick={() => setShowUnlink(true)} startIcon={<HeartBrokenIcon sx={{ fontSize: '16px !important' }} />} sx={{
+            py: 1.5, mb: 1.5, borderRadius: 3,
+            border: '1px solid rgba(255,80,80,0.08)', color: '#553333',
+            fontSize: '0.85rem', textTransform: 'none',
+            '&:hover': { borderColor: 'rgba(255,80,80,0.3)', color: '#ff5050', bgcolor: 'rgba(255,80,80,0.04)' },
+          }}>
+            Разорвать пару
+          </Button>
+        )}
         <Button fullWidth onClick={handleLogout} sx={{
           py: 1.5, borderRadius: 3,
           border: '1px solid rgba(255,80,80,0.12)', color: '#664444',
@@ -235,6 +258,35 @@ export default function Profile() {
               </Typography>
             </Box>
           ))}
+        </DialogContent>
+      </Dialog>
+
+      {/* Unlink dialog */}
+      <Dialog open={showUnlink} onClose={() => setShowUnlink(false)} PaperProps={{ sx: { p: 3, width: '100%', maxWidth: 380 } }}>
+        <DialogTitle sx={{ p: 0, mb: 1, color: '#fff', fontWeight: 300, letterSpacing: '0.05em', fontSize: '1.15rem' }}>
+          Разорвать пару?
+        </DialogTitle>
+        <DialogContent sx={{ p: '0 !important' }}>
+          <Typography sx={{ color: '#666', fontSize: '0.84rem', mb: 3, lineHeight: 1.6 }}>
+            Связь с {partner?.display_name || partner?.username} будет разорвана. Моменты останутся, но вы больше не будете парой.
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 1.5 }}>
+            <Button fullWidth onClick={() => setShowUnlink(false)} sx={{
+              py: 1.3, borderRadius: 3, border: '1px solid rgba(255,255,255,0.08)',
+              color: '#aaa', fontSize: '0.85rem', textTransform: 'none',
+              '&:hover': { borderColor: 'rgba(255,255,255,0.2)', color: '#fff' },
+            }}>
+              Отмена
+            </Button>
+            <Button fullWidth onClick={handleUnlink} disabled={unlinkLoading} sx={{
+              py: 1.3, borderRadius: 3, bgcolor: 'rgba(255,50,50,0.1)', border: '1px solid rgba(255,50,50,0.2)',
+              color: '#ff5050', fontSize: '0.85rem', textTransform: 'none',
+              '&:hover': { bgcolor: 'rgba(255,50,50,0.2)', borderColor: 'rgba(255,50,50,0.4)' },
+              '&:disabled': { opacity: 0.4 },
+            }}>
+              {unlinkLoading ? '...' : 'Разорвать'}
+            </Button>
+          </Box>
         </DialogContent>
       </Dialog>
 
