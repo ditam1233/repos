@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardActionArea, CardMedia, CardContent, Typography, Chip, Dialog, DialogTitle, DialogContent, IconButton, Box, Modal, Button, TextField, Avatar } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
@@ -9,6 +10,7 @@ import PhotoCarousel from './PhotoCarousel';
 const EMOJI_LIST = ['❤️', '🔥', '😍', '😂', '🥺', '👏'];
 
 export default function MomentCard({ moment, onDelete, currentUserId }) {
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [fullPhoto, setFullPhoto] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -280,13 +282,31 @@ export default function MomentCard({ moment, onDelete, currentUserId }) {
                   <Box key={c.id} sx={{ display: 'flex', gap: 1.5, alignItems: 'flex-start' }}>
                     <Avatar
                       src={c.profiles?.avatar_url}
-                      sx={{ width: 28, height: 28, bgcolor: 'rgba(255,255,255,0.08)', fontSize: '0.7rem', mt: 0.25 }}
+                      onClick={() => {
+                        if (c.author_id === currentUserId) navigate('/profile');
+                        else navigate(`/profile/${c.author_id}`);
+                      }}
+                      sx={{
+                        width: 28, height: 28, bgcolor: 'rgba(255,255,255,0.08)',
+                        fontSize: '0.7rem', mt: 0.25, cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        '&:hover': { borderColor: 'rgba(255,255,255,0.3)' },
+                      }}
                     >
                       {(c.profiles?.display_name || c.profiles?.username || '?').charAt(0).toUpperCase()}
                     </Avatar>
                     <Box sx={{ flex: 1, minWidth: 0 }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Typography sx={{ fontSize: '0.75rem', color: '#666', fontWeight: 500 }}>
+                        <Typography
+                          onClick={() => {
+                            if (c.author_id === currentUserId) navigate('/profile');
+                            else navigate(`/profile/${c.author_id}`);
+                          }}
+                          sx={{
+                            fontSize: '0.75rem', color: '#666', fontWeight: 500,
+                            cursor: 'pointer', '&:hover': { color: '#aaa' },
+                          }}
+                        >
                           {c.profiles?.display_name || c.profiles?.username}
                         </Typography>
                         <Typography sx={{ fontSize: '0.65rem', color: '#333' }}>

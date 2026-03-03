@@ -51,3 +51,8 @@
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translate(-50%, -20px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}

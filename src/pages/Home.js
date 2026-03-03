@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { getPairMoments, createMoment, linkPartner, getUser, deleteMoment, updatePairedAt } from '../utils/storage';
+import { getPairMoments, createMoment, linkPartner, getUser, deleteMoment, updatePairedAt, getUnreadCount, markChatRead } from '../utils/storage';
 import MomentCard from '../components/MomentCard';
 import {
   Box, AppBar, Toolbar, Typography, Avatar, MenuItem, Fab,
@@ -14,6 +14,10 @@ import AddIcon from '@mui/icons-material/Add';
 import TimelineIcon from '@mui/icons-material/ViewTimeline';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import Calendar from '../components/Calendar';
+import { subscribeToMoments, subscribeToMessages, unsubscribe } from '../utils/realtime';
+import FavoriteBorderIcon from '@mui/icons-material/FavoriteBorder';
+import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
+import Badge from '@mui/material/Badge';
 
 export default function Home() {
   const { user, logout, refresh } = useAuth();
@@ -35,6 +39,9 @@ export default function Home() {
   const [showEditDate, setShowEditDate] = useState(false);
   const [editDate, setEditDate] = useState('');
   const [calendarMoment, setCalendarMoment] = useState(null);
+  const channelRef = useRef(null);
+  const msgChannelRef = useRef(null);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [cachedAvatar, setCachedAvatar] = useState(() => {
     if (typeof window !== 'undefined') {
       return sessionStorage.getItem('avatar_cache') || null;
@@ -67,7 +74,37 @@ export default function Home() {
     loadMoments();
     if (user.partner_id) {
       getUser(user.partner_id).then(setPartner);
+
+      channelRef.current = subscribeToMoments(
+        user.id,
+        user.partner_id,
+        (newMoment) => {
+          setMoments(prev => {
+            if (prev.some(m => m.id === newMoment.id)) return prev;
+            return [newMoment, ...prev];
+          });
+        },
+        (oldMoment) => {
+          setMoments(prev => prev.filter(m => m.id !== oldMoment.id));
+        }
+      );
+
+      getUnreadCount(user.id, user.partner_id).then(setUnreadCount);
+
+      msgChannelRef.current = subscribeToMessages(
+        user.id,
+        user.partner_id,
+        (newMsg) => {
+          if (newMsg.sender_id !== user.id) {
+            setUnreadCount(prev => prev + 1);
+          }
+        }
+      );
     }
+    return () => {
+      unsubscribe(channelRef.current);
+      unsubscribe(msgChannelRef.current);
+    };
   }, [user, navigate, loadMoments]);
 
   if (!user) return null;
@@ -135,11 +172,17 @@ export default function Home() {
             Moments
           </Typography>
           {user?.partner_id && partner && (
-            <Typography sx={{
-              position: 'absolute', left: '50%', transform: 'translateX(-50%)',
-              color: '#444', fontSize: '0.78rem', letterSpacing: '0.03em',
-              '& strong': { color: '#999', fontWeight: 500 },
-            }}>
+            <Typography
+              onClick={() => navigate(`/profile/${partner.id}`)}
+              sx={{
+                position: 'absolute', left: '50%', transform: 'translateX(-50%)',
+                color: '#444', fontSize: '0.78rem', letterSpacing: '0.03em',
+                cursor: 'pointer', transition: 'color 0.2s ease',
+                '&:hover': { color: '#666' },
+                '& strong': { color: '#999', fontWeight: 500 },
+                '&:hover strong': { color: '#fff' },
+              }}
+            >
               Пара: <strong>{partner.display_name || partner.username}</strong>
             </Typography>
           )}
@@ -156,6 +199,35 @@ export default function Home() {
             }}>
               <TimelineIcon fontSize="small" />
             </IconButton>
+            {user?.partner_id && (
+              <>
+                <IconButton onClick={() => navigate('/wishlist')} sx={{
+                  color: '#555', width: 36, height: 36,
+                  '&:hover': { color: '#fff', bgcolor: 'rgba(255,255,255,0.06)' },
+                }}>
+                  <FavoriteBorderIcon fontSize="small" />
+                </IconButton>
+                <IconButton onClick={() => { setUnreadCount(0); markChatRead(user.id); navigate('/chat'); }} sx={{
+                  color: '#555', width: 36, height: 36,
+                  '&:hover': { color: '#fff', bgcolor: 'rgba(255,255,255,0.06)' },
+                }}>
+                  <Badge
+                    badgeContent={unreadCount}
+                    max={99}
+                    sx={{
+                      '& .MuiBadge-badge': {
+                        bgcolor: '#ff5050', color: '#fff',
+                        fontSize: '0.6rem', fontWeight: 700,
+                        minWidth: 16, height: 16,
+                        display: unreadCount > 0 ? 'flex' : 'none',
+                      },
+                    }}
+                  >
+                    <ChatBubbleOutlineIcon fontSize="small" />
+                  </Badge>
+                </IconButton>
+              </>
+            )}
           <Box
             sx={{ position: 'relative' }}
             onMouseEnter={() => setShowMenu(true)}

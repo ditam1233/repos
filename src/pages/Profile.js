@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useState, useCallback } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { getUser, getPairMoments, updateProfile, uploadAvatar, unlinkPartner } from '../utils/storage';
+import { getUser, getPairMoments, updateProfile, uploadAvatar, unlinkPartner, getPairStats, getPairRecentPhotos } from '../utils/storage';
 import {
   Box, AppBar, Toolbar, Typography, Avatar, Button, Card,
-  List, ListItem, Dialog, DialogTitle, DialogContent, TextField, Fab, IconButton, CircularProgress,
+  List, ListItem, Dialog, DialogTitle, DialogContent, TextField, Fab, IconButton, CircularProgress, Slider, Modal,
 } from '@mui/material';
 import HeartBrokenIcon from '@mui/icons-material/HeartBroken';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -12,10 +12,18 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import CheckIcon from '@mui/icons-material/Check';
 import UpdateIcon from '@mui/icons-material/Update';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
+import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary';
+import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
+import FavoriteBorderIcon from '@mui/icons-material/FavoriteBorder';
+import CloseIcon from '@mui/icons-material/Close';
+import Cropper from 'react-easy-crop';
 
 export default function Profile() {
   const { user, logout, refresh } = useAuth();
   const navigate = useNavigate();
+  const { id: profileId } = useParams();
+  const isOwnProfile = !profileId || profileId === user?.id;
+  const [profileUser, setProfileUser] = useState(null);
   const [partner, setPartner] = useState(null);
   const [momentCount, setMomentCount] = useState(0);
   const [copied, setCopied] = useState(false);
@@ -29,17 +37,45 @@ export default function Profile() {
   const [avatarLoading, setAvatarLoading] = useState(false);
   const [showUnlink, setShowUnlink] = useState(false);
   const [unlinkLoading, setUnlinkLoading] = useState(false);
+  const [cropImage, setCropImage] = useState(null);
+  const [crop, setCrop] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
+  const [stats, setStats] = useState({ photos: 0, comments: 0, reactions: 0 });
+  const [recentPhotos, setRecentPhotos] = useState([]);
+  const [fullPhoto, setFullPhoto] = useState(null);
+
+  const onCropComplete = useCallback((_, croppedPixels) => {
+    setCroppedAreaPixels(croppedPixels);
+  }, []);
 
   useEffect(() => {
     if (!user) { navigate('/auth'); return; }
-    if (user.partner_id) {
-      getUser(user.partner_id).then(setPartner);
-      getPairMoments(user.id).then(m => setMomentCount(m.length));
+    if (isOwnProfile) {
+      setProfileUser(user);
+      if (user.partner_id) {
+        getUser(user.partner_id).then(setPartner);
+        getPairMoments(user.id).then(m => setMomentCount(m.length));
+        getPairStats(user.id).then(setStats);
+        getPairRecentPhotos(user.id, 4).then(setRecentPhotos);
+      }
+    } else {
+      getUser(profileId).then(p => {
+        if (!p) { navigate('/home'); return; }
+        setProfileUser(p);
+        if (p.partner_id) {
+          getUser(p.partner_id).then(setPartner);
+          getPairMoments(p.id).then(m => setMomentCount(m.length));
+          getPairStats(p.id).then(setStats);
+          getPairRecentPhotos(p.id, 4).then(setRecentPhotos);
+        }
+      });
     }
-  }, [user, navigate]);
+  }, [user, navigate, profileId, isOwnProfile]);
 
-  if (!user) return null;
+  if (!user || !profileUser) return null;
 
+  const viewUser = profileUser;
   const handleLogout = () => { navigate('/'); logout(); };
 
   const handleCopyCode = () => {
@@ -69,18 +105,43 @@ export default function Profile() {
     setEditing(false);
   };
 
-  const handleAvatarChange = async (e) => {
+  const handleAvatarChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    setAvatarLoading(true);
     const reader = new FileReader();
-    reader.onload = async () => {
-      const result = await uploadAvatar(user.id, reader.result);
-      if (result?.error) console.error('Avatar upload error:', result.error);
-      await refresh();
-      setAvatarLoading(false);
+    reader.onload = () => {
+      setCropImage(reader.result);
+      setCrop({ x: 0, y: 0 });
+      setZoom(1);
     };
     reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const getCroppedImg = (imageSrc, pixelCrop) => {
+    return new Promise((resolve) => {
+      const image = new Image();
+      image.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = pixelCrop.width;
+        canvas.height = pixelCrop.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(image, pixelCrop.x, pixelCrop.y, pixelCrop.width, pixelCrop.height, 0, 0, pixelCrop.width, pixelCrop.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.9));
+      };
+      image.src = imageSrc;
+    });
+  };
+
+  const handleCropSave = async () => {
+    if (!cropImage || !croppedAreaPixels) return;
+    setAvatarLoading(true);
+    setCropImage(null);
+    const croppedBase64 = await getCroppedImg(cropImage, croppedAreaPixels);
+    const result = await uploadAvatar(user.id, croppedBase64);
+    if (result?.error) console.error('Avatar upload error:', result.error);
+    await refresh();
+    setAvatarLoading(false);
   };
 
   const handleUnlink = async () => {
@@ -93,10 +154,20 @@ export default function Profile() {
     setMomentCount(0);
   };
 
-  const displayName = user.display_name || user.username;
-  const createdAt = user.created_at
-    ? new Date(user.created_at).toLocaleDateString('ru-RU', { year: 'numeric', month: 'long', day: 'numeric' })
+  const displayName = viewUser.display_name || viewUser.username;
+  const createdAt = viewUser.created_at
+    ? new Date(viewUser.created_at).toLocaleDateString('ru-RU', { year: 'numeric', month: 'long', day: 'numeric' })
     : null;
+
+  const pairedAt = viewUser.paired_at;
+  const daysTogether = pairedAt ? Math.max(1, Math.floor((Date.now() - new Date(pairedAt).getTime()) / 86400000)) : 0;
+  const daysWord = (() => {
+    if (!daysTogether) return '';
+    const d = daysTogether;
+    if (d % 10 === 1 && d % 100 !== 11) return 'день';
+    if ([2,3,4].includes(d % 10) && ![12,13,14].includes(d % 100)) return 'дня';
+    return 'дней';
+  })();
 
   const changelog = [
     { date: '1 марта 2026', text: 'Добавлена страница профиля с редактированием имени и пароля' },
@@ -121,7 +192,7 @@ export default function Profile() {
             Назад
           </Button>
           <Typography sx={{ fontSize: '1rem', fontWeight: 200, letterSpacing: '0.2em', color: '#fff', textTransform: 'uppercase' }}>
-            Профиль
+            {isOwnProfile ? 'Профиль' : displayName}
           </Typography>
           <Box sx={{ width: 70 }} />
         </Toolbar>
@@ -135,7 +206,7 @@ export default function Profile() {
       }}>
         <Box sx={{ position: 'relative', mb: 2 }}>
           <Avatar
-            src={user.avatar_url || undefined}
+            src={viewUser.avatar_url || undefined}
             sx={{
               width: 80, height: 80,
               bgcolor: 'rgba(255,255,255,0.08)',
@@ -145,48 +216,71 @@ export default function Profile() {
           >
             {displayName.charAt(0).toUpperCase()}
           </Avatar>
-          <IconButton
-            component="label"
-            size="small"
-            disabled={avatarLoading}
-            sx={{
-              position: 'absolute', bottom: -4, right: -4,
-              bgcolor: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.15)',
-              color: '#aaa', width: 28, height: 28,
-              '&:hover': { bgcolor: 'rgba(255,255,255,0.2)', color: '#fff' },
-            }}
-          >
-            {avatarLoading ? <CircularProgress size={14} sx={{ color: '#aaa' }} /> : <CameraAltIcon sx={{ fontSize: 14 }} />}
-            <input type="file" accept="image/*" onChange={handleAvatarChange} hidden />
-          </IconButton>
+          {isOwnProfile && (
+            <IconButton
+              component="label"
+              size="small"
+              disabled={avatarLoading}
+              sx={{
+                position: 'absolute', bottom: -4, right: -4,
+                bgcolor: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.15)',
+                color: '#aaa', width: 28, height: 28,
+                '&:hover': { bgcolor: 'rgba(255,255,255,0.2)', color: '#fff' },
+              }}
+            >
+              {avatarLoading ? <CircularProgress size={14} sx={{ color: '#aaa' }} /> : <CameraAltIcon sx={{ fontSize: 14 }} />}
+              <input type="file" accept="image/*" onChange={handleAvatarChange} hidden />
+            </IconButton>
+          )}
         </Box>
         <Typography sx={{ color: '#fff', fontSize: '1.3rem', fontWeight: 300, letterSpacing: '0.05em', mb: 0.5 }}>
           {displayName}
         </Typography>
         <Typography sx={{ color: '#444', fontSize: '0.8rem', mb: 4 }}>
-          @{user.username}
+          @{viewUser.username}
         </Typography>
 
         <Card sx={{ width: '100%', mb: 4, borderRadius: 4, overflow: 'hidden', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
           <List disablePadding>
-            <ListItem sx={{ justifyContent: 'space-between', py: 2, px: 2.5, borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-              <Typography sx={{ color: '#555', fontSize: '0.82rem' }}>Ваш код</Typography>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <Typography sx={{
-                  color: '#ccc', fontSize: '0.85rem',
-                  fontFamily: "'SF Mono', 'Fira Code', monospace", letterSpacing: '0.15em',
-                }}>
-                  {user.code}
-                </Typography>
-                <IconButton size="small" onClick={handleCopyCode} sx={{ color: '#999', '&:hover': { color: '#fff' } }}>
-                  {copied ? <CheckIcon fontSize="small" /> : <ContentCopyIcon fontSize="small" />}
-                </IconButton>
-              </Box>
-            </ListItem>
-            {partner && (
+            {isOwnProfile && (
               <ListItem sx={{ justifyContent: 'space-between', py: 2, px: 2.5, borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                <Typography sx={{ color: '#555', fontSize: '0.82rem' }}>Ваш код</Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <Typography sx={{
+                    color: '#ccc', fontSize: '0.85rem',
+                    fontFamily: "'SF Mono', 'Fira Code', monospace", letterSpacing: '0.15em',
+                  }}>
+                    {user.code}
+                  </Typography>
+                  <IconButton size="small" onClick={handleCopyCode} sx={{ color: '#999', '&:hover': { color: '#fff' } }}>
+                    {copied ? <CheckIcon fontSize="small" /> : <ContentCopyIcon fontSize="small" />}
+                  </IconButton>
+                </Box>
+              </ListItem>
+            )}
+            {partner && (
+              <ListItem
+                onClick={() => {
+                  const targetId = isOwnProfile ? partner.id : viewUser.partner_id;
+                  if (targetId && targetId !== user.id) navigate(`/profile/${targetId}`);
+                  else if (targetId === user.id) navigate('/profile');
+                }}
+                sx={{
+                  justifyContent: 'space-between', py: 2, px: 2.5,
+                  borderBottom: '1px solid rgba(255,255,255,0.04)',
+                  cursor: 'pointer', '&:hover': { bgcolor: 'rgba(255,255,255,0.03)' },
+                }}
+              >
                 <Typography sx={{ color: '#555', fontSize: '0.82rem' }}>Пара</Typography>
-                <Typography sx={{ color: '#ccc', fontSize: '0.85rem' }}>{partner.display_name || partner.username}</Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Typography sx={{ color: '#ccc', fontSize: '0.85rem' }}>{partner.display_name || partner.username}</Typography>
+                  <Avatar
+                    src={partner.avatar_url || undefined}
+                    sx={{ width: 22, height: 22, fontSize: '0.6rem', bgcolor: 'rgba(255,255,255,0.1)' }}
+                  >
+                    {(partner.display_name || partner.username).charAt(0).toUpperCase()}
+                  </Avatar>
+                </Box>
               </ListItem>
             )}
             {partner && (
@@ -204,32 +298,103 @@ export default function Profile() {
           </List>
         </Card>
 
-        <Button fullWidth onClick={handleEdit} sx={{
-          py: 1.5, mb: 1.5, borderRadius: 3,
-          bgcolor: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)',
-          color: '#aaa', fontSize: '0.85rem', textTransform: 'none',
-          '&:hover': { borderColor: 'rgba(255,255,255,0.2)', color: '#fff', bgcolor: 'rgba(255,255,255,0.05)' },
-        }}>
-          Редактировать профиль
-        </Button>
-        {partner && (
-          <Button fullWidth onClick={() => setShowUnlink(true)} startIcon={<HeartBrokenIcon sx={{ fontSize: '16px !important' }} />} sx={{
-            py: 1.5, mb: 1.5, borderRadius: 3,
-            border: '1px solid rgba(255,80,80,0.08)', color: '#553333',
-            fontSize: '0.85rem', textTransform: 'none',
-            '&:hover': { borderColor: 'rgba(255,80,80,0.3)', color: '#ff5050', bgcolor: 'rgba(255,80,80,0.04)' },
-          }}>
-            Разорвать пару
-          </Button>
+        {/* Days together — only on partner's profile */}
+        {!isOwnProfile && partner && daysTogether > 0 && (
+          <Box sx={{ width: '100%', mb: 3, textAlign: 'center' }}>
+            <Typography sx={{ color: '#333', fontSize: '0.72rem', letterSpacing: '0.12em', textTransform: 'uppercase', mb: 0.5 }}>
+              Вместе
+            </Typography>
+            <Typography sx={{ color: '#fff', fontSize: '1.8rem', fontWeight: 200, letterSpacing: '0.05em' }}>
+              {daysTogether}
+            </Typography>
+            <Typography sx={{ color: '#444', fontSize: '0.75rem' }}>
+              {daysWord}
+            </Typography>
+          </Box>
         )}
-        <Button fullWidth onClick={handleLogout} sx={{
-          py: 1.5, borderRadius: 3,
-          border: '1px solid rgba(255,80,80,0.12)', color: '#664444',
-          fontSize: '0.85rem', textTransform: 'none',
-          '&:hover': { borderColor: 'rgba(255,80,80,0.4)', color: '#ff5050', bgcolor: 'rgba(255,80,80,0.04)' },
-        }}>
-          Выйти из аккаунта
-        </Button>
+
+        {/* Stats — only on partner's profile */}
+        {!isOwnProfile && partner && (stats.photos > 0 || stats.comments > 0 || stats.reactions > 0) && (
+          <Box sx={{
+            width: '100%', mb: 3, display: 'flex', justifyContent: 'center', gap: 3,
+          }}>
+            <Box sx={{ textAlign: 'center' }}>
+              <PhotoLibraryIcon sx={{ color: '#444', fontSize: 18, mb: 0.3 }} />
+              <Typography sx={{ color: '#ccc', fontSize: '1rem', fontWeight: 300 }}>{stats.photos}</Typography>
+              <Typography sx={{ color: '#444', fontSize: '0.65rem', letterSpacing: '0.05em' }}>фото</Typography>
+            </Box>
+            <Box sx={{ textAlign: 'center' }}>
+              <ChatBubbleOutlineIcon sx={{ color: '#444', fontSize: 18, mb: 0.3 }} />
+              <Typography sx={{ color: '#ccc', fontSize: '1rem', fontWeight: 300 }}>{stats.comments}</Typography>
+              <Typography sx={{ color: '#444', fontSize: '0.65rem', letterSpacing: '0.05em' }}>комментов</Typography>
+            </Box>
+            <Box sx={{ textAlign: 'center' }}>
+              <FavoriteBorderIcon sx={{ color: '#444', fontSize: 18, mb: 0.3 }} />
+              <Typography sx={{ color: '#ccc', fontSize: '1rem', fontWeight: 300 }}>{stats.reactions}</Typography>
+              <Typography sx={{ color: '#444', fontSize: '0.65rem', letterSpacing: '0.05em' }}>реакций</Typography>
+            </Box>
+          </Box>
+        )}
+
+        {/* Recent photos gallery — only on partner's profile */}
+        {!isOwnProfile && recentPhotos.length > 0 && (
+          <Box sx={{ width: '100%', mb: 4 }}>
+            <Typography sx={{ color: '#444', fontSize: '0.7rem', letterSpacing: '0.1em', textTransform: 'uppercase', mb: 1.5 }}>
+              Последние фото
+            </Typography>
+            <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 0.75 }}>
+              {recentPhotos.map((url, i) => (
+                <Box
+                  key={i}
+                  onClick={() => setFullPhoto(url)}
+                  sx={{
+                    aspectRatio: '1', borderRadius: 2, overflow: 'hidden', cursor: 'pointer',
+                    border: '1px solid rgba(255,255,255,0.04)',
+                    transition: 'all 0.3s ease',
+                    '&:hover': { borderColor: 'rgba(255,255,255,0.15)', transform: 'scale(1.03)' },
+                  }}
+                >
+                  <Box component="img" src={url} alt="" sx={{
+                    width: '100%', height: '100%', objectFit: 'cover',
+                    opacity: 0.85, transition: 'opacity 0.3s ease',
+                    '&:hover': { opacity: 1 },
+                  }} />
+                </Box>
+              ))}
+            </Box>
+          </Box>
+        )}
+
+        {isOwnProfile && (
+          <>
+            <Button fullWidth onClick={handleEdit} sx={{
+              py: 1.5, mb: 1.5, borderRadius: 3,
+              bgcolor: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)',
+              color: '#aaa', fontSize: '0.85rem', textTransform: 'none',
+              '&:hover': { borderColor: 'rgba(255,255,255,0.2)', color: '#fff', bgcolor: 'rgba(255,255,255,0.05)' },
+            }}>
+              Редактировать профиль
+            </Button>
+            {partner && (
+              <Button fullWidth onClick={() => setShowUnlink(true)} startIcon={<HeartBrokenIcon sx={{ fontSize: '16px !important' }} />} sx={{
+                py: 1.5, mb: 1.5, borderRadius: 3,
+                border: '1px solid rgba(255,80,80,0.08)', color: '#553333',
+                fontSize: '0.85rem', textTransform: 'none',
+                '&:hover': { borderColor: 'rgba(255,80,80,0.3)', color: '#ff5050', bgcolor: 'rgba(255,80,80,0.04)' },
+              }}>
+                Разорвать пару
+              </Button>
+            )}
+            <Button fullWidth onClick={handleLogout} sx={{
+              py: 1.5, borderRadius: 3,
+              border: '1px solid rgba(255,80,80,0.12)', color: '#664444',
+              fontSize: '0.85rem', textTransform: 'none',
+              '&:hover': { borderColor: 'rgba(255,80,80,0.4)', color: '#ff5050', bgcolor: 'rgba(255,80,80,0.04)' },
+            }}>
+              Выйти из аккаунта
+            </Button>
+          </>
+        )}
       </Box>
 
       {/* Changelog FAB */}
@@ -268,7 +433,7 @@ export default function Profile() {
         </DialogTitle>
         <DialogContent sx={{ p: '0 !important' }}>
           <Typography sx={{ color: '#666', fontSize: '0.84rem', mb: 3, lineHeight: 1.6 }}>
-            Связь с {partner?.display_name || partner?.username} будет разорвана. Моменты останутся, но вы больше не будете парой.
+            Связь с {partner?.display_name || partner?.username} будет разорвана. Все совместные моменты будут удалены.
           </Typography>
           <Box sx={{ display: 'flex', gap: 1.5 }}>
             <Button fullWidth onClick={() => setShowUnlink(false)} sx={{
@@ -289,6 +454,82 @@ export default function Profile() {
           </Box>
         </DialogContent>
       </Dialog>
+
+      {/* Avatar crop dialog */}
+      <Dialog open={!!cropImage} onClose={() => setCropImage(null)} maxWidth="sm" fullWidth
+        PaperProps={{ sx: { p: 0, overflow: 'hidden', maxWidth: 400 } }}>
+        <DialogTitle sx={{ px: 2.5, py: 2, color: '#fff', fontWeight: 300, letterSpacing: '0.05em', fontSize: '1.05rem' }}>
+          Обрезать фото
+        </DialogTitle>
+        <Box sx={{ position: 'relative', width: '100%', height: 300, bgcolor: '#111' }}>
+          {cropImage && (
+            <Cropper
+              image={cropImage}
+              crop={crop}
+              zoom={zoom}
+              aspect={1}
+              cropShape="round"
+              showGrid={false}
+              onCropChange={setCrop}
+              onZoomChange={setZoom}
+              onCropComplete={onCropComplete}
+            />
+          )}
+        </Box>
+        <Box sx={{ px: 3, py: 1.5 }}>
+          <Slider
+            value={zoom}
+            min={1}
+            max={3}
+            step={0.1}
+            onChange={(_, v) => setZoom(v)}
+            sx={{
+              color: '#fff',
+              '& .MuiSlider-thumb': { width: 16, height: 16 },
+              '& .MuiSlider-track': { height: 2 },
+              '& .MuiSlider-rail': { height: 2, opacity: 0.2 },
+            }}
+          />
+        </Box>
+        <Box sx={{ display: 'flex', gap: 1.5, px: 2.5, pb: 2.5 }}>
+          <Button fullWidth onClick={() => setCropImage(null)} sx={{
+            py: 1.3, borderRadius: 3, border: '1px solid rgba(255,255,255,0.08)',
+            color: '#aaa', fontSize: '0.85rem', textTransform: 'none',
+            '&:hover': { borderColor: 'rgba(255,255,255,0.2)', color: '#fff' },
+          }}>
+            Отмена
+          </Button>
+          <Button fullWidth onClick={handleCropSave} sx={{
+            py: 1.3, borderRadius: 3, bgcolor: '#fff', color: '#050505',
+            fontSize: '0.85rem', textTransform: 'none', fontWeight: 600,
+            '&:hover': { bgcolor: '#fff', boxShadow: '0 4px 20px rgba(255,255,255,0.12)' },
+          }}>
+            Сохранить
+          </Button>
+        </Box>
+      </Dialog>
+
+      {/* Fullscreen photo */}
+      <Modal open={!!fullPhoto} onClose={() => setFullPhoto(null)}>
+        <Box onClick={() => setFullPhoto(null)} sx={{
+          position: 'fixed', inset: 0,
+          bgcolor: 'rgba(0,0,0,0.95)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          cursor: 'zoom-out', zIndex: 1300,
+        }}>
+          <IconButton onClick={() => setFullPhoto(null)} sx={{
+            position: 'absolute', top: 16, right: 16, zIndex: 3,
+            bgcolor: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.15)',
+            color: '#ccc', width: 36, height: 36,
+            '&:hover': { color: '#fff', bgcolor: 'rgba(255,255,255,0.2)' },
+          }}>
+            <CloseIcon />
+          </IconButton>
+          <Box component="img" src={fullPhoto} alt="" sx={{
+            maxWidth: '95vw', maxHeight: '95vh', objectFit: 'contain', borderRadius: 1,
+          }} />
+        </Box>
+      </Modal>
 
       {/* Edit dialog */}
       <Dialog open={editing} onClose={() => setEditing(false)} PaperProps={{ sx: { p: 3, width: '100%', maxWidth: 420 } }}>
